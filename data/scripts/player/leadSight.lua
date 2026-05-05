@@ -11,13 +11,18 @@ local inputLocked = false
 local eps = 0.00001
 local ticks = 0
 
+-- Config
+local toggleKey = (KeyboardKey and KeyboardKey.Slash) or nil
+local chatFeedbackEnabled = false
+local soundFeedbackEnabled = true
+local debugEnabled = false
+
 local maxTickValue = 1000000
 local meanProjectileSpeed = 0
 local rangeMax = 0
 local rangeMin = 0
 ----------HUD-------------------------
 local effects = {}
-local nominalLineWidth = 0.5 --10*m
 local closeClippingDistance = 10 --10*m
 local blue = Color()
 	blue.a = 1.0
@@ -84,6 +89,11 @@ end
 function initialize()
 end
 
+function LeadSight.debug(msg)
+	if not debugEnabled then return end
+	print("[LeadSight] " .. tostring(msg))
+end
+
 function updateClient(timeStep)
 
 	LeadSight.clearEffects(ticks)
@@ -91,18 +101,28 @@ function updateClient(timeStep)
 		LeadSight.updateReticle(ticks)
 	end
 
-	if (Keyboard():keyPressed(KeyboardKey.Slash) and not inputLocked) then
-		playSound("interface/confirm_order", 1, 0.35)
+	local kb = Keyboard()
+	if kb and toggleKey and kb:keyPressed(toggleKey) and not inputLocked then
+		if soundFeedbackEnabled then
+			playSound("interface/confirm_order", 1, 0.35)
+		end
+
 		enabled = not enabled
-		--local player = Player()
-		-- if enabled then
-			-- player:sendChatMessage("Lead sight is set to: ON", 2)
-		-- else
-			-- player:sendChatMessage("Lead sight is set to: OFF", 2)
-		-- end
+
+		if chatFeedbackEnabled then
+			local player = Player()
+			if player and player.sendChatMessage then
+				if enabled then
+					player:sendChatMessage("Lead sight: ON", 2)
+				else
+					player:sendChatMessage("Lead sight: OFF", 2)
+				end
+			end
+		end
+
 		inputLocked = true
 	end
-	if (not Keyboard():keyPressed(KeyboardKey.Slash) and inputLocked) then
+	if kb and toggleKey and (not kb:keyPressed(toggleKey)) and inputLocked then
 		inputLocked = false
 	end
 
@@ -116,11 +136,18 @@ end
 
 function LeadSight.updateReticle(ticks)
 	local player = Player()
-	--print("Obtained Player:" .. player.name)
-	
-	local target = Entity(player.selectedObject)
+	if not player then
+		return
+	end
+
+	local selected = player.selectedObject
+	if not selected then
+		return
+	end
+
+	local target = Entity(selected)
 	local craft = player.craft
-	
+
 	if (target == nil or craft == nil) then
 		return
 	end
@@ -139,8 +166,17 @@ function LeadSight.updateReticle(ticks)
 		return
 	end
 	
-	local craftVelocity = Velocity(craft.id).velocity
-	local targetVelocity = Velocity(target.id).velocity
+	local craftVelObj = Velocity(craft.id)
+	local targetVelObj = Velocity(target.id)
+	if not craftVelObj or not targetVelObj then
+		return
+	end
+
+	local craftVelocity = craftVelObj.velocity
+	local targetVelocity = targetVelObj.velocity
+	if not craftVelocity or not targetVelocity then
+		return
+	end
 	
 	--target velocity relative to the player ship as if the player ship was still
 	local cc = {}
@@ -225,7 +261,9 @@ function LeadSight.clearEffects()
 	   -- print("Effects used " .. nextEffectToFetch)
 	for i,e in ipairs(effects) do
 		if (i >= nextEffectToFetch or hardClean) then
-			sector:removeLaser(e)
+			if e then
+				sector:removeLaser(e)
+			end
 			effects[i] = nil
 		end
 	end
@@ -239,6 +277,9 @@ function LeadSight.fetchNextEffect()
 
 	if (nextEffectToFetch >= #effects) then
 		local newEffect = Sector():createLaser(vec3(0,0,0), vec3(0,0,0), blue, 1)
+		if not newEffect then
+			return nil
+		end
 		newEffect.auraWidth = 0
 		newEffect.soundMaxRadius = 0
 		newEffect.soundVolume = 0
@@ -261,6 +302,7 @@ function LeadSight.drawDot(color, position, distance, size)
 	local position2 = vec3(position.x + lineWidth/2, position.y, position.z)
 	
 	local laser = LeadSight.fetchNextEffect()
+	if not laser then return end
 	laser.from = position1
 	laser.to = position2
 	laser.origin = position1
@@ -347,6 +389,7 @@ function LeadSight.drawLine(color, position1, position2, distance, width)
 	local lineWidth = LeadSight.getWeightedWidth(distance, width)
 	
 	local laser = LeadSight.fetchNextEffect()
+	if not laser then return end
 	laser.from = position1
 	laser.to = position2
 	laser.width = lineWidth
